@@ -1,0 +1,15 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY gateway/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
+    pip install --no-cache-dir gradio requests
+
+# Copy interface script
+COPY scripts/gradio_interface.py /app/gradio_interface.py
+
+EXPOSE 7860
+
+CMD ["python", "gradio_interface.py"]
