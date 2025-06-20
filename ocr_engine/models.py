@@ -28,7 +28,6 @@ class NodeJsPayload(BaseModel):
     zoneName: Optional[str] = ""
     language: str
     date: str
-    zoneName: Optional[str] = None
     newsId: Optional[str] = None
     articles: List[Dict[str, Any]]
 
