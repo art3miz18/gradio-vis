@@ -25,6 +25,20 @@ from models import (
 from config import s3_client as task_s3_client, AWS_S3_BUCKET_NAME_CONFIG as TASK_S3_BUCKET_NAME, AWS_REGION_CONFIG
 import config
 
+@celery_ocr_engine_app.task(name="ocr_engine.update_content_prompt", bind=True)
+def update_content_prompt_task(self, new_prompt: str):
+    """Update the content analysis prompt on the worker and reload the model."""
+    pid = os.getpid()
+    log_prefix = f"PromptUpdateTask[{self.request.id}/{pid}]"
+    try:
+        from config import update_content_analysis_system_instruction
+        success = update_content_analysis_system_instruction(new_prompt)
+        return {"updated": success}
+    except Exception as e:
+        print(f"{log_prefix}: Error {e}")
+        import traceback; traceback.print_exc()
+        return {"updated": False, "error": str(e)}
+
 NODE_APP_CALLBACK_URL = os.getenv("CRAWLER_API_URL")
 if not NODE_APP_CALLBACK_URL:
     print("\u26a0\ufe0f WARNING: CRAWLER_API_URL not set.")
