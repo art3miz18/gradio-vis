@@ -262,6 +262,13 @@ Launch the UI by running:
 python gradio_interface.py
 ```
 
+You can also run the entire stack (gateway, OCR engine, Redis and the Gradio UI)
+using Docker Compose:
+
+```bash
+docker compose -f docker-compose.epaper-test.yml up --build
+```
+
 The interface allows you to send requests to the Gateway service running on `http://localhost:8000` by default. Set the `GATEWAY_URL` environment variable to target a different gateway instance.
 
 ### Usage Examples
@@ -300,6 +307,13 @@ Install the dependencies and launch the interface:
 ```bash
 pip install gradio requests
 python scripts/gradio_interface.py
+```
+
+Alternatively you can spin up the entire stack using Docker Compose which also
+runs the Gradio container:
+
+```bash
+docker compose -f docker-compose.epaper-test.yml up --build
 ```
 
 The interface exposes three tabs:

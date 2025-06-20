@@ -22,6 +22,20 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 5001 --reload
     restart: unless-stopped
 
+  gradio_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.gradio
+    env_file: .env
+    environment:
+      - GATEWAY_BASE_URL=http://gateway:5001
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./scripts/gradio_interface.py:/app/gradio_interface.py:ro
+    depends_on:
+      - gateway
+
   ocr_engine_worker:
     build:
       context: ./ocr_engine
