@@ -142,9 +142,29 @@ The production configuration uses pre-built images and includes Docker Swarm set
   - Process digital article from S3 JSON
   - Parameters: `s3_url`, `site_name`, `timestamp`, `mediaId`
 
+- **POST /process/single_image**
+  - Process a single newspaper page image
+  - Parameters: `image`, `publicationName`, `editionName`, `languageName`, `zoneName`, `date`, `pageNumber`
+
 - **GET /tasks/{task_id}**
   - Check status of a processing task
   - Returns task state and results
+- **POST /admin/update_prompt**
+  - Update the Gemini content analysis prompt (requires `X-Admin-Token` header)
+  - Body: `{ "prompt": "new system instruction" }`
+
+### Updating the Prompt
+
+Use the `/admin/update_prompt` endpoint to change the system instruction used by the OCR engine workers.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/admin/update_prompt \
+     -H "X-Admin-Token: <your_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "You are a journalist..."}'
+```
 
 ## 🔧 Configuration
 
@@ -219,6 +239,57 @@ The system includes Flower for monitoring Celery tasks:
 - S3 bucket permissions should be properly configured
 - Consider implementing API authentication for the Gateway service
 - Regularly update dependencies to address security vulnerabilities
+- Set the `ADMIN_TOKEN` environment variable to secure admin endpoints like `/admin/update_prompt`
+
+
+## 🎛️ Local Gradio Interface
+
+This repository includes an optional Gradio-based client for interacting with the Gateway API.
+
+### Prerequisites
+
+Install Gradio and Requests in your Python environment:
+
+```bash
+pip install gradio requests
+```
+
+### Running the Interface
+
+Launch the UI by running:
+
+```bash
+python gradio_interface.py
+```
+
+The interface allows you to send requests to the Gateway service running on `http://localhost:8000` by default. Set the `GATEWAY_URL` environment variable to target a different gateway instance.
+
+### Usage Examples
+
+**Upload a PDF**
+1. Select the *Upload PDF* tab.
+2. Choose a PDF file and fill in the publication information.
+3. Click **Submit PDF**. The response contains a `task_id` you can query via `/tasks/{task_id}`.
+
+**Process Images**
+1. Open the *Direct Images* tab.
+2. Enter the path to the directory containing images on the gateway host.
+3. Click **Submit Images** to queue the `/process/direct_images` task.
+
+**Send Raw JSON**
+1. Use the *Raw JSON* tab to paste article text.
+2. Press **Submit JSON** to call `/process/digital_raw_json`.
+
+### Modifying Prompts
+
+Prompt templates used for article analysis live in `ocr_engine/config_newPrompt.py`. Edit the `*_SYSTEM_INSTRUCTION` strings to customize Gemini behavior and restart the OCR workers for changes to take effect.
+
+## ➕ New API Endpoints
+
+Alongside existing routes, the Gateway now exposes:
+
+- **POST /process/direct_images** – queue OCR processing for a local image directory. Returns `{ "message": str, "task_id": str }`.
+- **POST /process/digital_raw_json** – analyze article content sent directly as JSON. Returns `{ "message": str, "task_id": str }`.
 
 
 ## 🎛️ Gradio Interface
@@ -238,3 +309,4 @@ The interface exposes three tabs:
 3. **Custom Prompt** – sends text to the runtime prompt endpoint and shows the result.
 
 Set `GATEWAY_BASE_URL` environment variable if your gateway runs on a different URL.
+
