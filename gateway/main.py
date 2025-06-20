@@ -2,6 +2,7 @@
 import os
 import uuid
 import re
+import tempfile
 from typing import Optional, Any, List, Dict
 
 import boto3
@@ -169,6 +170,49 @@ async def process_direct_images(request_data: DirectImageProcessingPayload = Bod
     return SimpleAckResponse(
         message=f"Direct image processing task queued for {len(image_files)} images in {request_data.imageDirectory}",
         task_id=task_submission.id
+    )
+
+# Flow 6: /process/single_image (Single Image Upload)
+@app.post("/process/single_image", response_model=TaskResponse, status_code=202)
+async def process_single_image(
+    image: UploadFile = File(...),
+    publicationName: str = Form(...),
+    editionName: str = Form(None),
+    languageName: str = Form(...),
+    zoneName: str = Form(None),
+    date: Optional[str] = Form(None),
+    pageNumber: int = Form(1)
+):
+    """Upload a single newspaper page image for processing."""
+
+    if not image.filename:
+        raise HTTPException(status_code=400, detail="No file name.")
+
+    suffix = os.path.splitext(image.filename)[1] or ".jpg"
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_f:
+            contents = await image.read()
+            tmp_f.write(contents)
+            temp_path = tmp_f.name
+    finally:
+        await image.close()
+
+    task_submission = celery_gateway_app.send_task(
+        "ocr_engine.process_single_image",
+        args=[
+            temp_path,
+            publicationName,
+            editionName,
+            date,
+            languageName,
+            zoneName,
+            pageNumber,
+        ],
+    )
+
+    return TaskResponse(
+        task_id=task_submission.id,
+        message="Single image processing task queued."
     )
 
 # Flow 5: /process/digital_raw_json (Digital Article from Raw JSON)
