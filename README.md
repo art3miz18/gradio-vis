@@ -228,7 +228,7 @@ Install the dependencies and launch the interface:
 
 ```bash
 pip install gradio requests
-python gradio_interface.py
+python scripts/gradio_interface.py
 ```
 
 The interface exposes three tabs:
