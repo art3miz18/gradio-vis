@@ -291,4 +291,22 @@ Alongside existing routes, the Gateway now exposes:
 - **POST /process/direct_images** – queue OCR processing for a local image directory. Returns `{ "message": str, "task_id": str }`.
 - **POST /process/digital_raw_json** – analyze article content sent directly as JSON. Returns `{ "message": str, "task_id": str }`.
 
-These complement `/pipeline`, `/crawl/newspaper_pdf`, and `/process/digital_s3_json`. Retrieve task progress via `GET /tasks/{task_id}` which reports the Celery state and results.
+
+## 🎛️ Gradio Interface
+
+A simple Gradio-based dashboard is provided to interact with the gateway API.
+Install the dependencies and launch the interface:
+
+```bash
+pip install gradio requests
+python scripts/gradio_interface.py
+```
+
+The interface exposes three tabs:
+
+1. **Upload PDF** – calls `/pipeline` with PDF and processing parameters.
+2. **Process Image** – uploads an image to `/process/single_image`.
+3. **Custom Prompt** – sends text to the runtime prompt endpoint and shows the result.
+
+Set `GATEWAY_BASE_URL` environment variable if your gateway runs on a different URL.
+
