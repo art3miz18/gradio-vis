@@ -1,0 +1,15 @@
+# fastapi
+# uvicorn
+python-dotenv
+python-multipart
+pdf2image
+Pillow
+boto3
+google-generativeai
+opencv-python-headless
+numpy
+# matplotlib
+arcanum-newspaper-segmentation-client
+celery[redis]
+redis
+httpx

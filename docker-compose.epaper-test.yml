@@ -1,0 +1,68 @@
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    env_file: .env
+    volumes:
+      - ./gateway:/app # For development hot-reloading if uvicorn is run with --reload
+      - newspaper_images:/app/newspaper_images # Shared volume for newspaper images
+    depends_on:
+      - redis
+    command: uvicorn main:app --host 0.0.0.0 --port 5001 --reload
+    restart: unless-stopped
+
+  ocr_engine_worker:
+    build:
+      context: ./ocr_engine
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./ocr_engine:/app
+      - newspaper_images:/app/newspaper_images
+    depends_on:
+      - redis
+    command: celery -A celery_app:celery_ocr_engine_app worker -l info -c 4 --max-memory-per-child=300000 --max-tasks-per-child=1
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app:celery_ocr_engine_app", "inspect", "ping"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  flower:
+    image: mher/flower
+    ports:
+      - "5055:5555"
+    environment:
+      - CELERY_BROKER_URL=${REDIS_URL}
+      - FLOWER_BASIC_AUTH=${FLOWER_USER}:${FLOWER_PASS}
+    depends_on:
+      - redis
+      - ocr_engine_worker
+    restart: unless-stopped
+  
+volumes:
+  redis_data:
+  newspaper_images:
+
+networks:
+  default:
+    name: ml_default
+    external: true
