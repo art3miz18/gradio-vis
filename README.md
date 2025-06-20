@@ -145,6 +145,22 @@ The production configuration uses pre-built images and includes Docker Swarm set
 - **GET /tasks/{task_id}**
   - Check status of a processing task
   - Returns task state and results
+- **POST /admin/update_prompt**
+  - Update the Gemini content analysis prompt (requires `X-Admin-Token` header)
+  - Body: `{ "prompt": "new system instruction" }`
+
+### Updating the Prompt
+
+Use the `/admin/update_prompt` endpoint to change the system instruction used by the OCR engine workers.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/admin/update_prompt \
+     -H "X-Admin-Token: <your_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "You are a journalist..."}'
+```
 
 ## 🔧 Configuration
 
@@ -219,4 +235,5 @@ The system includes Flower for monitoring Celery tasks:
 - S3 bucket permissions should be properly configured
 - Consider implementing API authentication for the Gateway service
 - Regularly update dependencies to address security vulnerabilities
+- Set the `ADMIN_TOKEN` environment variable to secure admin endpoints like `/admin/update_prompt`
 

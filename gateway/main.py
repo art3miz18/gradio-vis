@@ -5,7 +5,7 @@ import re
 from typing import Optional, Any, List, Dict
 
 import boto3
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Header
 from pydantic import BaseModel, Field
 
 from celery_app import celery_gateway_app
@@ -32,10 +32,15 @@ if AWS_S3_BUCKET_NAME and os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECR
 else:
     print("⚠️ WARNING (Gateway): S3 credentials/bucket incomplete.")
 
+# Admin token for protected endpoints
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
 # --- Pydantic Models for Gateway ---
 class TaskResponse(BaseModel): task_id: str; message: Optional[str] = None
 class SimpleAckResponse(BaseModel): message: str; task_id: Optional[str] = None
 class StatusResponse(BaseModel): state: str; result: Optional[Dict[str, Any]] = None; info: Optional[Any] = None
+class PromptUpdateRequest(BaseModel):
+    prompt: str
 
 # --- CORRECTED INPUT MODEL for Flow 3 (/process/digital_s3_json) ---
 # This is what the crawler sends TO THE GATEWAY for Flow 3
@@ -195,6 +200,17 @@ async def process_digital_raw_json(request_data: DigitalRawJsonPayload = Body(..
         message=f"Digital article processing task queued for {request_data.title or 'Untitled Article'}",
         task_id=task_submission.id
     )
+
+# --- Admin Endpoint to Update Content Analysis Prompt ---
+@app.post("/admin/update_prompt", response_model=SimpleAckResponse)
+async def update_prompt_endpoint(request: PromptUpdateRequest = Body(...), x_admin_token: str = Header(None)):
+    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    task = celery_gateway_app.send_task(
+        "ocr_engine.update_content_prompt",
+        args=[request.prompt],
+    )
+    return SimpleAckResponse(message="Prompt update task queued", task_id=task.id)
 
 @app.get("/")
 async def root(): return {"message": "Multi-Source Content Processing Gateway API"}

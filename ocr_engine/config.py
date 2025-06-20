@@ -727,6 +727,28 @@ def get_configured_digital_text_analyzer_model(): # NEW getter
     if not digital_text_analyzer_model_instance: print(f"Process {os.getpid()}: Digital text analyzer model accessed but is None.")
     return digital_text_analyzer_model_instance
 
+# --- Dynamic Prompt Update ---
+def update_content_analysis_system_instruction(new_instruction: str) -> bool:
+    """Update the system prompt for content analysis and reinitialize the model."""
+    global CONTENT_ANALYSIS_SYSTEM_INSTRUCTION, content_analyzer_model_instance
+    CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = new_instruction
+    try:
+        if PROCESS_SPECIFIC_GEMINI_KEY:
+            content_analyzer_model_instance = genai.GenerativeModel(
+                model_name=CONTENT_ANALYSIS_MODEL_NAME,
+                generation_config=CONTENT_ANALYSIS_GENERATION_CONFIG,
+                system_instruction=CONTENT_ANALYSIS_SYSTEM_INSTRUCTION,
+            )
+            print(f"Process {os.getpid()}: Content analysis prompt updated and model reinitialized.")
+            return True
+        else:
+            print(f"Process {os.getpid()}: Gemini key not configured; cannot reinitialize model.")
+            return False
+    except Exception as e:
+        print(f"Process {os.getpid()}: Failed to update prompt: {e}")
+        content_analyzer_model_instance = None
+        return False
+
 # --- AWS S3 Client ---
 AWS_S3_BUCKET_NAME_CONFIG = os.getenv('AWS_S3_BUCKET_NAME')
 AWS_REGION_CONFIG = os.getenv('AWS_S3_REGION', 'ap-south-1')
