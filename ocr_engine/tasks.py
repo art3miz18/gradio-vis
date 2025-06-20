@@ -416,6 +416,45 @@ def process_direct_images_task(self, image_directory: str, publication_name: str
         import traceback; traceback.print_exc()
         raise self.retry(exc=e)
 
+
+@celery_ocr_engine_app.task(name="ocr_engine.process_single_image", bind=True, acks_late=True, max_retries=3, default_retry_delay=5*60)
+def process_single_image_task(
+    self,
+    image_path: str,
+    publication_name: str,
+    edition_name: Optional[str],
+    document_date: Optional[str],
+    language_name: str,
+    zone_name: Optional[str],
+    page_number: int,
+):
+    """Process a single newspaper page image."""
+    task_id = self.request.id
+    pid = os.getpid()
+    log_prefix = f"SingleImageTask[{task_id}/{pid}]"
+
+    try:
+        result = pipeline_logic.process_newspaper_page_image(
+            image_path,
+            publication_name,
+            edition_name,
+            document_date,
+            language_name,
+            zone_name,
+            page_number,
+        )
+        return result
+    except Exception as e:
+        print(f"{log_prefix}: ERROR: {e}")
+        import traceback; traceback.print_exc()
+        raise self.retry(exc=e)
+    finally:
+        if image_path and os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+            except Exception:
+                pass
+
 @celery_ocr_engine_app.task(name="ocr_engine.analyze_s3_digital_article_json", bind=True, acks_late=True, max_retries=3, default_retry_delay=3*60)
 def analyze_s3_digital_article_json_task(self, task_input_payload_dict: Dict[str, Any]):
     current_task_id = self.request.id

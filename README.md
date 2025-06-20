@@ -142,6 +142,10 @@ The production configuration uses pre-built images and includes Docker Swarm set
   - Process digital article from S3 JSON
   - Parameters: `s3_url`, `site_name`, `timestamp`, `mediaId`
 
+- **POST /process/single_image**
+  - Process a single newspaper page image
+  - Parameters: `image`, `publicationName`, `editionName`, `languageName`, `zoneName`, `date`, `pageNumber`
+
 - **GET /tasks/{task_id}**
   - Check status of a processing task
   - Returns task state and results
