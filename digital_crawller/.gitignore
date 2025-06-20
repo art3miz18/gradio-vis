@@ -1,0 +1,8 @@
+.venv/
+.env
+.myenv
+indian_news_data/
+digital_data/
+__pycache__/
+
+
