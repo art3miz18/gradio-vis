@@ -70,14 +70,14 @@ async def analyze_news_article_content(
         return {**base_error_return, "error": "Article crop image file not found."}
 
     try:
-        # Secondary Ad Check specific to this image crop
-        is_ad = await _is_advertisement_gemini_async(article_crop_path)
-        if is_ad:
-            print(f"[{pid}] ImgAnalyzer: Article {unique_article_id} classified as AD by Gemini. Skipping.")
-            if os.path.exists(article_crop_path):
-                try: os.remove(article_crop_path)
-                except Exception as e_rem: print(f"[{pid}] ImgAnalyzer: Error cleaning ad image {article_crop_path}: {e_rem}")
-            return None # Signal ad
+        # DISABLED: Secondary Ad Check specific to this image crop
+        # is_ad = await _is_advertisement_gemini_async(article_crop_path)
+        # if is_ad:
+        #     print(f"[{pid}] ImgAnalyzer: Article {unique_article_id} classified as AD by Gemini. Skipping.")
+        #     if os.path.exists(article_crop_path):
+        #         try: os.remove(article_crop_path)
+        #         except Exception as e_rem: print(f"[{pid}] ImgAnalyzer: Error cleaning ad image {article_crop_path}: {e_rem}")
+        #     return None # Signal ad
 
         current_image_content_model = get_configured_content_analyzer_model()
         if not current_image_content_model:

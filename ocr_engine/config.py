@@ -93,7 +93,7 @@ def assign_gemini_key_and_configure_sdk():
 # --- Gemini Model Definitions & Instances ---
 # Validate model names - "gemini-2.0-flash" might not be a standard public model.
 # Common choices: "gemini-1.5-flash-latest" (or "gemini-1.5-flash"), "gemini-1.5-pro-latest"
-CONTENT_ANALYSIS_MODEL_NAME = os.getenv("GEMINI_CONTENT_MODEL", "gemini-2.0-flash")
+CONTENT_ANALYSIS_MODEL_NAME = os.getenv("GEMINI_CONTENT_MODEL", "gemini-2.5-flash")
 CONTENT_ANALYSIS_GENERATION_CONFIG = types.GenerationConfig(
     candidate_count=1, stop_sequences=[], max_output_tokens=4096
 )
@@ -183,26 +183,27 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
       - NITI Aayog
 
     ### GENERAL CLASSIFICATION RULES applicable for all ministries
+    0. Do not assume anything on your own.
     1. Based on the news article, identify up to THREE Indian government ministries that are most relevant to the issues mentioned, chosen only from the list provided below. If fewer than three are relevant, return fewer; if none, return an empty list [].
     2. Use both contextual meaning and keywords to determine the ministry.
-    3. Give priority to official schemes, departments, and major recurring themes.
+    3. Give priority to official schemes and departments.
     4. Your classification should reflect a deep understanding of:
     - Which ministries are **likely responsible or impacted**
     - Which policies, schemes, administrative roles, or governance functions are **core to the discussion**
     - **Who is being mentioned in what capacity**, and whether the **intent or outcome** aligns with a specific ministry’s domain.
     5. The news classified should be related to central government only.
     6. If the news is related to any private entity/entities where Indian Government is not related, discard it.
-    7. Any news about violence/loot/stabbing/theft/road rage or similar ones which is unrelated to central government should be discarded.
+    7. Any article which falls under a broader category of a ministry should not be classified.
     8. News around bollywood, hollywood or any film industry **excluding legal cases against actors** where films are promoted or discussed as a hot topic should not be classified.
     9. If you come across any news article which is international and there is no direct/indirect relation to India/Indian Government, discard it.
     10. Classification should be made only if the article's primary focus, intent, or policy implications clearly fall within the scope of the ministry's responsibilities including its thematic domain, leadership role, or key initiatives.
     11. If the article only vaguely refers to a topic, mentions keywords incidentally, or does not clearly establish the ministry's relevance, then do not classify it under that ministry even if signal terms appear.
     12. It is not necessary to classify an article into any ministry if the available information is insufficient, vague, or off-topic. Return an empty "ministries" array in such cases.
-
+    13. Classify the news to a ministry only if it is directly under the ministry interest.
 
     ### SPECIAL CLASSIFICATION RULES based on Meta Data provided for individual ministries:
 
-    Use the **below special classification rules and reference lists** Treat the rules as main decision support — **but not as hard-coded filters**.
+    Use the **below special classification rules and reference lists** Treat the rules as the ONLY decision support for classification**
     This analysis is meant to simulate how a human expert would classify the article: based on **intent, relevance, responsibility, and administrative fit**, rather than just string-matching.
 
     1. If any of the key officials are mentioned in the article from the list `key_officials_list` for that ministry, treat them as a strong signal for classifying under that ministry.
@@ -218,11 +219,11 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
 
 "Ministry of Electronics and Information Technology": {
 "key_officials_list": ["Ashwini Vaishnaw", "Jitin Prasada", "S. Krishnan", "Abhishek Singh", "Amitesh Kumar Sinha", "Rajesh Singh", "Sushil Pal", "Krishan Kumar Singh"],
-"keywords_phrases_list": ["Semiconductor","MEITY","Digital India", "India Stack", "CoWIN", "MyGov", "DigiLocker", "Bhashini", "AI in governance", "India AI Mission", "DPI", "API Setu", "App Store India", "UMANG", "ONDC", "Common Services Centres", "Digital Village program", "chip design", "fabrication", "ATMP", "Chips to Startup", "Foxconn", "Applied Materials", "Lam Research", "e-KYC", "Aadhaar Face Authentication", "Aadhaar authentication", "AI for Good Governance", "National e-Governance Division", "eOffice", "eCabinet", "Foundations and Risk Mitigation in AI/ML", "AI Adoption for Enhanced Governance", "AI Tools for Smarter Public Administration", "Building Robust AI Infrastructure", "AI-related risks", "OpenForge", "National Cloud Services", "GI Cloud", "MeghRaj", "DIKSHA platform", "Government e-Marketplace", "eSanjeevani", "e-Hospital", "Techade", "National Supercomputing Mission", "India Innovation Centre for Graphene", "Global Value Chains", "Electronics Manufacturing Clusters", "Electronics Systems Design and Manufacturing", "ESDM sector", "IECT", "ICT sector", "IT Hardware manufacturing sector", "M-SIPS", "Viability Gap Funding", "BPO", "ITeS", "STPI", "EHTP", "Electronic Hardware Technology Park", "Ready Built Factory", "Plug and Play facilities", "Government-to-Citizen e-Services", "TIDE", "Technology Incubation and Development of Entrepreneurs"],
+"keywords_phrases_list": ["Chip Design","Semiconductor","MEITY","Digital India", "India Stack", "CoWIN", "MyGov", "DigiLocker", "Bhashini", "AI in governance", "India AI Mission", "DPI", "API Setu", "App Store India", "UMANG", "ONDC", "Common Services Centres", "Digital Village program", "chip design", "fabrication", "ATMP", "Chips to Startup", "Foxconn", "Applied Materials", "Lam Research", "e-KYC", "Aadhaar Face Authentication", "Aadhaar authentication", "AI for Good Governance", "National e-Governance Division", "eOffice", "eCabinet", "Foundations and Risk Mitigation in AI/ML", "AI Adoption for Enhanced Governance", "AI Tools for Smarter Public Administration", "Building Robust AI Infrastructure", "AI-related risks", "OpenForge", "National Cloud Services", "GI Cloud", "MeghRaj", "DIKSHA platform", "Government e-Marketplace", "eSanjeevani", "e-Hospital", "Techade", "National Supercomputing Mission", "India Innovation Centre for Graphene", "Global Value Chains", "Electronics Manufacturing Clusters", "Electronics Systems Design and Manufacturing", "ESDM sector", "IECT", "ICT sector", "IT Hardware manufacturing sector", "M-SIPS", "Viability Gap Funding", "BPO", "ITeS", "STPI", "EHTP", "Electronic Hardware Technology Park", "Ready Built Factory", "Plug and Play facilities", "Government-to-Citizen e-Services", "TIDE", "Technology Incubation and Development of Entrepreneurs"],
 "Policies_schemes_list": ["Chips to Startup (C2S)", "Common Services Centres", "Digital Village program", "Technology Incubation and Development of Entrepreneurs (TIDE)", "AI for Good Governance", "Digital Infrastructure for Knowledge Sharing (DIKSHA)", "MeghRaj", "National Supercomputing Mission", "Electronics Manufacturing Clusters", "Electronics System Design and Manufacturing (ESDM)", "Modified Special Incentive Package Scheme (M-SIPS)", "Viability Gap Funding (VGF) for BPO/ITeS"],
 "Organization_list": ["National e-Governance Division", "Software Technology Parks of India", "Electronic Hardware Technology Park", "Government e-Marketplace", "India Innovation Centre for Graphene", "OpenForge", "National Cloud Services", "GI Cloud", "MeghRaj"],
-"temporary_keywords": [],
-"specific_rules": []
+"temporary_keywords": ["NIXI","Dr. Devesh Tyagi", "77 internet exchange points"],
+"specific_rules": ["Avoid news related to election commission.", "Article which contains generic news on technology should not be classified"]
 },
 
 "Prime Minister's Office": {
@@ -230,7 +231,7 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
 "keywords_phrases_list": ["Prime Minister's Visit", "Bilateral Summit", "Modi", "Pradhan Mantri", "PM's Intervention", "PM's Statement", "PM's Message", "PM's Participation", "PM's Virtual Address", "PM's Bilateral Meetings", "PM's Interaction with Diaspora", "PMO Coordination", "PMO Oversight", "PMO-led Initiative", "Mann ki Baat", "PMO Monitoring", "PMO Review", "PMO Approval", "PMO Guidance", "PMO Briefing", "Modi 3.0", "PMO India"],
 "Policies_schemes_list": ["Digital India", "Make in India", "Swachh Bharat", "Atmanirbhar Bharat", "Vasudhaiva Kutumbakam", "International Day of Yoga", "Voice of Global South", "PM Vishwakarma Yojana", "PM eBus Seva", "PM Poshan Shakti Nirman Abhiyaan", "PM SVANidhi", "PM Garib Kalyan Rojgar Abhiyaan", "PM Matsya Sampada Yojana", "PM Kisan Samman Nidhi", "PM Kisan Urja Suraksha Evam Utthan Mahabhiyan", "PM Shram Yogi Mandhan", "PM Annadata Aay Sanrakshan Abhiyan", "PM Jan Vikas Karyakaram", "PM Matritva Vandana Yojana", "PM Ujjwala Yojana", "PM Fasal Bima Yojana", "PM Krishi Sinchai Yojana", "PM Mudra Yojana", "PM Gramin Awas Yojana", "PM Awaas Yojana - (Urban)", "PM Suraksha Bima Yojana", "PM Kaushal Vikas Yojna", "PM Bhartiya Jan Aushadhi Kendra", "PM Jan Dhan Yojana", "PM Adarsh Gram Yojana"],
 "temporary_keywords": ["11 Years", "Modi Government"],
-"specific_rules": []
+"specific_rules": ["News which are related to India's  "]
 },
 
 "Ministry of Defence": {
@@ -265,8 +266,8 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
 "keywords_phrases_list": ["I&B","Cable Television Networks (Regulation) Act 1995", "Cinematograph Act 1952", "Press and Registration of Periodicals Act 2023", "Self-regulatory Bodies", "Content Regulation", "Media Ethics", "Media Accreditation", "Fact Checking Unit (FCU)", "Programme Code", "Advertising Code", "Emergency Alert Dissemination", "Community Radio Guidelines", "Digital Media Ethics Code", "OTT (Over-the-top) Regularization", "Broadcasting Infrastructure and Network Development (BIND) Scheme", "Community Radio Station (CRS)", "Vartalap", "Azadi Ka Amrit Mahotsav", "Mann Ki Baat", "Yuva Sangam", "MIB – Ministry of Information and Broadcasting", "CBC – Central Bureau of Communication", "PIB – Press Information Bureau", "NFDC – National Film Development Corporation", "DFF – Directorate of Film Festivals", "CBFC – Central Board of Film Certification", "BECIL – Broadcast Engineering Consultants India Ltd", "FTII – Film and Television Institute of India", "SRFTI – Satyajit Ray Film and Television Institute", "IIMC – Indian Institute of Mass Communication", "EMMC – Electronic Media Monitoring Centre", "CRS – Community Radio Station", "DTH – Direct to Home", "DRM – Digital Radio Mondiale", "BIND – Broadcasting Infrastructure and Network Development", "IRD – Integrated Receiver Decoder", "DSNG – Digital Satellite News Gathering", "National Channel", "Jan Vishwas Act 2023", "E-Cinepramaan", "Cinematograph (Certification) Rules 2024", "National Film Heritage Mission (NFHM)", "SHABD Initiative", "Cinematograph (Amendment) Act 2023", "Press and Registration of Periodicals Act 2023 (PRP Act)"],
 "Policies_schemes_list": ["Development Communication & Information Dissemination (DCID)", "Development Communication & Dissemination of Filmic Content (DCDFC)", "Broadcasting Infrastructure Network Development (BIND)", "Supporting Community Radio Movement in India"],
 "Organization_list": ["Press Information Bureau", "Central Bureau Of Communication", "Press Registrar General of India", "Directorate of Publication Division (DPD)", "New Media Wing", "Electronic Media Monitoring Centre (EMMC)", "Central Board of Film Certification", "Press Council of India", "Prasar Bharati", "Indian Institute of Mass Communication"],
-"temporary_keywords": [],
-"specific_rules": ["No bollywood or film industry news article to be categorized excluding court case and legal matters"]
+"temporary_keywords": ["#BadaltaBharatMeraAnubhav","Viksit Bharat@2047", "Badalta Bharat Mera Anubhav"  ],
+"specific_rules": ["No bollywood or film industry news article to be categorized", "legal matters should be classified", "Article related to TV Programs, Movies, Music Programs, Concerts and New release should not be categorized"]
 },
 
 "Ministry of Civil Aviation": {
@@ -284,7 +285,7 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
 "Policies_schemes_list": ["Scheme of Modernization of Prisons", "Swatantrata Sainik Samman Pension Scheme", "Kabir Puraskar Scheme", "Central Scheme for Assistance toward damaged Immovable/Movable Property During Action by CPMFs AND ARMY in Jammu & Kashmir", "Resettlement of Bru migrants", "Scheme for Surrender-cum-Rehabilitation of insurgents in NE States", "Scheme for providing relief and rehabilitation assistance to Sri-Lankan refugees in the refugee camps", "Vibrant Villages Programme", "Disaster Management Schemes", "Police Modernization Scheme", "Schemes for Left Wing Extremism (LWE) Affected Areas", "Border Area Development Programme (BADP)", "CAPF Welfare Schemes"],
 "Organization_list": ["National Investigation Agency (NIA)", "Central Armed Police Forces (CAPFs)", "Cyber Crime Coordination Centre (I4C)", "National Intelligence Grid (NATGRID)", "Intelligence Bureau (IB)", "National Security Guard (NSG)", "Inter-State Council Secretariat", "Registrar General & Census Commissioner", "National Crime Records Bureau (NCRB)", "Central Forensic Science Laboratory (CFSL)", "Sashastra Seema Bal (SSB)", "Border Security Force (BSF)", "Indo-Tibetan Border Police (ITBP)", "Central Reserve Police Force (CRPF)", "Rapid Action Force (RAF)", "Women Safety Division", "Disaster Management Division", "Forensic Science Laboratories (FSLs)", "Police Training Institutes"],
 "temporary_keywords": [],
-"specific_rules": []
+"specific_rules": ["Extract only those news articles that are relevant to the Ministry of Home Affairs (MHA) at the central level. Focus on topics such as national security, terrorism, border management, NIA, CBI, UAPA, citizenship (NRC/CAA), cyber security (handled by MHA)","Exclude small regional/local crime stories, general state police actions, local thefts, assaults, or law-and-order issues that do not involve central agencies or policy-level implications","News retaled to Centre-State Relations should not be classified even if it directly relates to ministry interest","News related to cyber crime and digital fraud should not be categorized"]
 },
 
 "Ministry of Road Transport & Highways": {
@@ -380,11 +381,12 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
         "english_content": "...",
         "english_summary": "...",
         "sentiment": "positive" | "negative" | "neutral",
-        "ministries": [ { "ministry": "..." } ],
+        "ministries": [ { "ministry": "..."} ],
         "date": "dd-mm-yyyy" | "unknown",
         "author_name": "..."
       }
       Ensure "ministries" is always an array, even if empty. Ensure "date" is in dd-mm-yyyy format or exactly "unknown".
+      If "ministries" have empty array, set values of "language", "heading", "content", "english_heading", "english_content", "english_summary", "sentiment", "author_name" as "unknown"
       DO NOT wrap the JSON in Markdown or code fences.
 
 """
@@ -726,28 +728,6 @@ def get_configured_content_analyzer_model(): # This is for IMAGE based newspaper
 def get_configured_digital_text_analyzer_model(): # NEW getter
     if not digital_text_analyzer_model_instance: print(f"Process {os.getpid()}: Digital text analyzer model accessed but is None.")
     return digital_text_analyzer_model_instance
-
-# --- Dynamic Prompt Update ---
-def update_content_analysis_system_instruction(new_instruction: str) -> bool:
-    """Update the system prompt for content analysis and reinitialize the model."""
-    global CONTENT_ANALYSIS_SYSTEM_INSTRUCTION, content_analyzer_model_instance
-    CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = new_instruction
-    try:
-        if PROCESS_SPECIFIC_GEMINI_KEY:
-            content_analyzer_model_instance = genai.GenerativeModel(
-                model_name=CONTENT_ANALYSIS_MODEL_NAME,
-                generation_config=CONTENT_ANALYSIS_GENERATION_CONFIG,
-                system_instruction=CONTENT_ANALYSIS_SYSTEM_INSTRUCTION,
-            )
-            print(f"Process {os.getpid()}: Content analysis prompt updated and model reinitialized.")
-            return True
-        else:
-            print(f"Process {os.getpid()}: Gemini key not configured; cannot reinitialize model.")
-            return False
-    except Exception as e:
-        print(f"Process {os.getpid()}: Failed to update prompt: {e}")
-        content_analyzer_model_instance = None
-        return False
 
 # --- AWS S3 Client ---
 AWS_S3_BUCKET_NAME_CONFIG = os.getenv('AWS_S3_BUCKET_NAME')

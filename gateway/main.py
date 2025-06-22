@@ -2,11 +2,10 @@
 import os
 import uuid
 import re
-import tempfile
 from typing import Optional, Any, List, Dict
 
 import boto3
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Header
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from pydantic import BaseModel, Field
 
 from celery_app import celery_gateway_app
@@ -33,15 +32,10 @@ if AWS_S3_BUCKET_NAME and os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECR
 else:
     print("⚠️ WARNING (Gateway): S3 credentials/bucket incomplete.")
 
-# Admin token for protected endpoints
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
-
 # --- Pydantic Models for Gateway ---
 class TaskResponse(BaseModel): task_id: str; message: Optional[str] = None
 class SimpleAckResponse(BaseModel): message: str; task_id: Optional[str] = None
 class StatusResponse(BaseModel): state: str; result: Optional[Dict[str, Any]] = None; info: Optional[Any] = None
-class PromptUpdateRequest(BaseModel):
-    prompt: str
 
 # --- CORRECTED INPUT MODEL for Flow 3 (/process/digital_s3_json) ---
 # This is what the crawler sends TO THE GATEWAY for Flow 3
@@ -141,7 +135,7 @@ async def get_task_status(task_id: str):
     return StatusResponse(**response_data)
 
 # Flow 4: /process/direct_images (Direct Image Processing from Crawler)
-@app.post("/process/direct_images", response_model=SimpleAckResponse, status_code=202)
+@app.post("/process/direct_images", response_model=TaskResponse, status_code=202)
 async def process_direct_images(request_data: DirectImageProcessingPayload = Body(...)):
     """
     Process images directly from a directory without S3 upload/download.
@@ -172,52 +166,9 @@ async def process_direct_images(request_data: DirectImageProcessingPayload = Bod
         ]
     )
     
-    return SimpleAckResponse(
-        message=f"Direct image processing task queued for {len(image_files)} images in {request_data.imageDirectory}",
-        task_id=task_submission.id
-    )
-
-# Flow 6: /process/single_image (Single Image Upload)
-@app.post("/process/single_image", response_model=TaskResponse, status_code=202)
-async def process_single_image(
-    image: UploadFile = File(...),
-    publicationName: str = Form(...),
-    editionName: str = Form(None),
-    languageName: str = Form(...),
-    zoneName: str = Form(None),
-    date: Optional[str] = Form(None),
-    pageNumber: int = Form(1)
-):
-    """Upload a single newspaper page image for processing."""
-
-    if not image.filename:
-        raise HTTPException(status_code=400, detail="No file name.")
-
-    suffix = os.path.splitext(image.filename)[1] or ".jpg"
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_f:
-            contents = await image.read()
-            tmp_f.write(contents)
-            temp_path = tmp_f.name
-    finally:
-        await image.close()
-
-    task_submission = celery_gateway_app.send_task(
-        "ocr_engine.process_single_image",
-        args=[
-            temp_path,
-            publicationName,
-            editionName,
-            date,
-            languageName,
-            zoneName,
-            pageNumber,
-        ],
-    )
-
     return TaskResponse(
         task_id=task_submission.id,
-        message="Single image processing task queued."
+        message=f"Direct image processing task queued for {len(image_files)} images in {request_data.imageDirectory}"
     )
 
 # Flow 5: /process/digital_raw_json (Digital Article from Raw JSON)
@@ -244,17 +195,6 @@ async def process_digital_raw_json(request_data: DigitalRawJsonPayload = Body(..
         message=f"Digital article processing task queued for {request_data.title or 'Untitled Article'}",
         task_id=task_submission.id
     )
-
-# --- Admin Endpoint to Update Content Analysis Prompt ---
-@app.post("/admin/update_prompt", response_model=SimpleAckResponse)
-async def update_prompt_endpoint(request: PromptUpdateRequest = Body(...), x_admin_token: str = Header(None)):
-    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid admin token")
-    task = celery_gateway_app.send_task(
-        "ocr_engine.update_content_prompt",
-        args=[request.prompt],
-    )
-    return SimpleAckResponse(message="Prompt update task queued", task_id=task.id)
 
 @app.get("/")
 async def root(): return {"message": "Multi-Source Content Processing Gateway API"}

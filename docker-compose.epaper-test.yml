@@ -24,15 +24,13 @@ services:
 
   gradio_ui:
     build:
-      context: .
-      dockerfile: Dockerfile.gradio
+      context: ./ui
+      dockerfile: Dockerfile
     env_file: .env
     environment:
       - GATEWAY_BASE_URL=http://gateway:5001
     ports:
       - "7860:7860"
-    volumes:
-      - ./scripts/gradio_interface.py:/app/gradio_interface.py:ro
     depends_on:
       - gateway
 
