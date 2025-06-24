@@ -47,7 +47,13 @@ async def _is_advertisement_gemini_async(image_path: str) -> bool:
         
         img_data_part = {"mime_type": "image/jpeg", "data": img_b64}
         prompt_parts = [AD_CHECK_PROMPT, img_data_part]
-        resp_obj = await asyncio.to_thread(current_ad_checker_model.generate_content, prompt_parts)
+        
+        from config import retry_with_exponential_backoff
+        
+        def make_ad_api_call():
+            return current_ad_checker_model.generate_content(prompt_parts)
+        
+        resp_obj = await asyncio.to_thread(retry_with_exponential_backoff, make_ad_api_call)
         if resp_obj and resp_obj.text:
             res_dict = extract_json_from_response(resp_obj.text)
             return res_dict.get("is_advertisement", False) if isinstance(res_dict, dict) else False
@@ -109,9 +115,15 @@ async def analyze_news_article_content(
         
         # System instruction is part of current_image_content_model
         try:
+            from config import retry_with_exponential_backoff
+            
+            def make_api_call():
+                return current_image_content_model.generate_content(
+                    contents=[image_data_for_main_analysis]
+                )
+            
             gemini_response_object = await asyncio.to_thread(
-                current_image_content_model.generate_content,
-                contents=[image_data_for_main_analysis]
+                retry_with_exponential_backoff, make_api_call
             )
             
             # Handle the response more carefully
@@ -177,10 +189,13 @@ async def analyze_digital_text_content(
     # 0. Inline textual ad check
     ad_model = get_configured_text_ad_checker_model()
     if ad_model:
-        ad_input = text_content
+        from config import retry_with_exponential_backoff
+        
+        def make_text_ad_api_call():
+            return ad_model.generate_content(contents=text_content)
+        
         ad_resp = await asyncio.to_thread(
-            ad_model.generate_content,
-            contents=ad_input
+            retry_with_exponential_backoff, make_text_ad_api_call
         )
         ad_text = ad_resp.text if hasattr(ad_resp, 'text') else ''
         ad_json = extract_json_from_response(ad_text)
@@ -208,9 +223,15 @@ async def analyze_digital_text_content(
 
     # print(f"{log_prefix}: Sending text (len {len(full_prompt_for_text_model)}) to Gemini text model...")
     try:
+        from config import retry_with_exponential_backoff
+        
+        def make_text_api_call():
+            return current_text_model.generate_content(
+                contents=[full_prompt_for_text_model]
+            )
+        
         response_object = await asyncio.to_thread(
-            current_text_model.generate_content,
-            contents=[full_prompt_for_text_model]
+            retry_with_exponential_backoff, make_text_api_call
         )
         response_text = response_object.text if response_object and hasattr(response_object, 'text') else None
         

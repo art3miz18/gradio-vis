@@ -7,6 +7,9 @@ from google.generativeai import types
 import threading
 import redis # For distributing keys across processes
 from typing import Optional
+import time
+import hashlib
+from google.generativeai import caching
 
 # Load environment variables
 load_dotenv()
@@ -664,6 +667,102 @@ content_analyzer_model_instance = None
 ad_checker_model_instance = None
 digital_text_analyzer_model_instance = None # NEW
 text_ad_checker_model_instance = None
+
+# Context caching variables
+cached_content_model_instance = None
+cached_text_model_instance = None
+cache_expiry_time = 3600  # 1 hour cache expiry
+last_cache_refresh = 0
+
+# Rate limiting variables
+api_call_times = []
+max_calls_per_minute = 60
+rate_limit_lock = threading.Lock()
+def wait_for_rate_limit():
+    """Implement rate limiting to avoid hitting API limits"""
+    global api_call_times
+    current_time = time.time()
+    
+    with rate_limit_lock:
+        # Remove calls older than 1 minute
+        api_call_times = [t for t in api_call_times if current_time - t < 60]
+        
+        # If we're at the limit, wait
+        if len(api_call_times) >= max_calls_per_minute:
+            wait_time = 60 - (current_time - api_call_times[0])
+            if wait_time > 0:
+                print(f"[{os.getpid()}] Rate limit reached, waiting {wait_time:.2f} seconds")
+                time.sleep(wait_time)
+                api_call_times = [t for t in api_call_times if time.time() - t < 60]
+        
+        # Record this API call
+        api_call_times.append(time.time())
+
+def create_cached_content_model():
+    """Create a cached model for content analysis with system instruction cached"""
+    global cached_content_model_instance, last_cache_refresh
+    
+    current_time = time.time()
+    
+    # Check if cache is still valid
+    if (cached_content_model_instance and 
+        current_time - last_cache_refresh < cache_expiry_time):
+        return cached_content_model_instance
+    
+    try:
+        # Create cache with system instruction
+        cache_name = f"content_analysis_cache_{int(current_time)}"
+        
+        # Cache the system instruction to reduce token usage
+        cached_content = caching.CachedContent.create(
+            model=CONTENT_ANALYSIS_MODEL_NAME,
+            display_name=cache_name,
+            contents=[CONTENT_ANALYSIS_SYSTEM_INSTRUCTION],
+            ttl_seconds=cache_expiry_time,
+        )
+        
+        # Create model using cached content
+        cached_content_model_instance = genai.GenerativeModel.from_cached_content(
+            cached_content=cached_content,
+            generation_config=CONTENT_ANALYSIS_GENERATION_CONFIG
+        )
+        
+        last_cache_refresh = current_time
+        print(f"[{os.getpid()}] Created cached content analysis model: {cache_name}")
+        return cached_content_model_instance
+        
+    except Exception as e:
+        print(f"[{os.getpid()}] Failed to create cached model, falling back to regular model: {e}")
+        return content_analyzer_model_instance
+
+def create_cached_text_model():
+    """Create a cached model for digital text analysis with system instruction cached"""
+    global cached_text_model_instance
+    
+    try:
+        cache_name = f"text_analysis_cache_{int(time.time())}"
+        
+        # Cache the system instruction to reduce token usage
+        cached_content = caching.CachedContent.create(
+            model=DIGITAL_TEXT_ANALYSIS_MODEL_NAME,
+            display_name=cache_name,
+            contents=[DIGITAL_TEXT_ANALYSIS_SYSTEM_INSTRUCTION],
+            ttl_seconds=cache_expiry_time,
+        )
+        
+        # Create model using cached content
+        cached_text_model_instance = genai.GenerativeModel.from_cached_content(
+            cached_content=cached_content,
+            generation_config=DIGITAL_TEXT_ANALYSIS_GENERATION_CONFIG
+        )
+        
+        print(f"[{os.getpid()}] Created cached text analysis model: {cache_name}")
+        return cached_text_model_instance
+        
+    except Exception as e:
+        print(f"[{os.getpid()}] Failed to create cached text model, falling back to regular model: {e}")
+        return digital_text_analyzer_model_instance
+
 def init_models_for_process():
     global content_analyzer_model_instance, ad_checker_model_instance, text_ad_checker_model_instance, digital_text_analyzer_model_instance # Allow modification
     pid = os.getpid()
@@ -712,6 +811,26 @@ def init_models_for_process():
     else:
         print(f"Process {pid}: Skipping model initialization as PROCESS_SPECIFIC_GEMINI_KEY is not set.")
 
+def retry_with_exponential_backoff(func, max_retries=3, base_delay=1):
+    """Retry function with exponential backoff for API calls"""
+    for attempt in range(max_retries):
+        try:
+            wait_for_rate_limit()  # Apply rate limiting before each attempt
+            return func()
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Check for specific error types that should be retried
+            if any(keyword in error_msg for keyword in ['rate limit', 'quota', 'resource exhausted', 'timeout']):
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"[{os.getpid()}] API error (attempt {attempt + 1}/{max_retries}): {e}")
+                    print(f"[{os.getpid()}] Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                    continue
+            raise e
+    raise Exception(f"Max retries ({max_retries}) exceeded")
+
 # --- Getter functions for models ---
 def get_configured_ad_checker_model():
     if not ad_checker_model_instance: print(f"Process {os.getpid()}: Ad checker model accessed but is None.")
@@ -720,12 +839,31 @@ def get_configured_ad_checker_model():
 def get_configured_text_ad_checker_model():
     if not text_ad_checker_model_instance: print(f"Process {os.getpid()}: Ad checker model accessed but is None.")
     return text_ad_checker_model_instance
+
 def get_configured_content_analyzer_model(): # This is for IMAGE based newspaper articles
-    if not content_analyzer_model_instance: print(f"Process {os.getpid()}: Image content analyzer model accessed but is None.")
+    """Get cached content analyzer model for better performance and cost efficiency"""
+    try:
+        cached_model = create_cached_content_model()
+        if cached_model:
+            return cached_model
+    except Exception as e:
+        print(f"Process {os.getpid()}: Failed to get cached content model: {e}")
+    
+    if not content_analyzer_model_instance: 
+        print(f"Process {os.getpid()}: Image content analyzer model accessed but is None.")
     return content_analyzer_model_instance
 
-def get_configured_digital_text_analyzer_model(): # NEW getter
-    if not digital_text_analyzer_model_instance: print(f"Process {os.getpid()}: Digital text analyzer model accessed but is None.")
+def get_configured_digital_text_analyzer_model(): # NEW getter with caching
+    """Get cached digital text analyzer model for better performance and cost efficiency"""
+    try:
+        cached_model = create_cached_text_model()
+        if cached_model:
+            return cached_model
+    except Exception as e:
+        print(f"Process {os.getpid()}: Failed to get cached text model: {e}")
+    
+    if not digital_text_analyzer_model_instance: 
+        print(f"Process {os.getpid()}: Digital text analyzer model accessed but is None.")
     return digital_text_analyzer_model_instance
 
 # --- AWS S3 Client ---
