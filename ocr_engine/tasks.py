@@ -54,18 +54,26 @@ def notify_node_on_completion_task(self, notification_data_wrapper: Dict[str, An
         raise self.retry(exc=e, countdown=int(self.default_retry_delay * (1.5**self.request.retries)))
 
 @celery_ocr_engine_app.task(name="ocr_engine.process_document", bind=True, acks_late=True, max_retries=3, default_retry_delay=5*60)
-def process_document_task(self, s3_pdf_key: str, publication_name: str, edition_name: Optional[str], document_date: Optional[str], language_name: str, zoneName: Optional[str], dpi: int, quality: int, should_notify_node: bool, resize_bool: bool):
+def process_document_task(self, pdf_path_or_s3_key: str, publication_name: str, edition_name: Optional[str], document_date: Optional[str], language_name: str, zoneName: Optional[str], dpi: int, quality: int, should_notify_node: bool, resize_bool: bool):
     task_id = self.request.id
     pid = os.getpid()
     downloaded_pdf_path = None
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix=f"celery_dl_{task_id.replace('-', '')}_") as tmp_f:
-            downloaded_pdf_path = tmp_f.name
-        task_s3_client.download_file(TASK_S3_BUCKET_NAME, s3_pdf_key, downloaded_pdf_path)
+        # Check if it's a local file path or S3 key
+        if os.path.exists(pdf_path_or_s3_key):
+            # It's a local file path - use directly
+            downloaded_pdf_path = pdf_path_or_s3_key
+            print(f"[{pid}] Using local file: {downloaded_pdf_path}")
+        else:
+            # It's an S3 key - download from S3
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix=f"celery_dl_{task_id.replace('-', '')}_") as tmp_f:
+                downloaded_pdf_path = tmp_f.name
+            task_s3_client.download_file(TASK_S3_BUCKET_NAME, pdf_path_or_s3_key, downloaded_pdf_path)
+            print(f"[{pid}] Downloaded from S3: {pdf_path_or_s3_key} -> {downloaded_pdf_path}")
 
         pdf_output = pipeline_logic.process_newspaper_pdf_sync_caller(
-            downloaded_pdf_path, publication_name, edition_name, document_date, language_name, zoneName, dpi, quality, resize_bool
+            downloaded_pdf_path, publication_name, edition_name, document_date, language_name, zoneName, dpi, quality, resize_bool, task_id
         )
 
         if should_notify_node and NODE_APP_CALLBACK_URL:
@@ -85,7 +93,7 @@ def process_document_task(self, s3_pdf_key: str, publication_name: str, edition_
                         "ministryName": art.get("ministryName", "Unknown"),
                         "AdditionMinisrtyName": art.get("AdditionMinisrtyName", []),
                         "extracted_date_from_gemini": "unknown",
-                        "path": f"s3://{TASK_S3_BUCKET_NAME}/{s3_pdf_key}",
+                        "path": f"local://{pdf_path_or_s3_key}",
                         "image_url": art.get("image_url")
                     })
 
@@ -113,8 +121,14 @@ def process_document_task(self, s3_pdf_key: str, publication_name: str, edition_
         import traceback; traceback.print_exc()
         raise self.retry(exc=e)
     finally:
+        # Only remove temporary downloaded files, not original local files
         if downloaded_pdf_path and os.path.exists(downloaded_pdf_path):
-            os.remove(downloaded_pdf_path)
+            # Don't delete if it's the original file passed from gateway
+            if downloaded_pdf_path != pdf_path_or_s3_key:
+                os.remove(downloaded_pdf_path)
+                print(f"[{pid}] Cleaned up temporary file: {downloaded_pdf_path}")
+            else:
+                print(f"[{pid}] Keeping original file: {downloaded_pdf_path}")
 
 @celery_ocr_engine_app.task(name="ocr_engine.process_direct_images", bind=True, acks_late=True, max_retries=3, default_retry_delay=5*60)
 def process_direct_images_task(self, image_directory: str, publication_name: str, edition_name: Optional[str], document_date: str, language_name: str, zone_name: Optional[str], should_notify_node: bool):

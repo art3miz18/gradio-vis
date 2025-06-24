@@ -18,6 +18,7 @@ from services.image_processor import crop_articles_from_segmentation_data
 from services.content_analyzer import analyze_news_article_content # Async
 from services.s3_handler import upload_file_to_s3, save_analysis_json_and_upload # Async
 from util.dummyFile import DummyUpload # For the sync_caller
+from progress_tracker import ProgressTracker, ProcessingStep
 
 # Import Arcanum client directly here as it's part of page processing
 from newspaper_segmentation_client import run_newspaper_segmentation
@@ -107,7 +108,8 @@ async def _orchestrate_pdf_processing(
     dpi_param: int,
     quality_param: int, # For full page images from pdf2image
     task_temp_dir: str,
-    resize_bool: bool    
+    resize_bool: bool,
+    task_id: Optional[str] = None
 ) -> Dict[str, Any]:
     start_time = time.monotonic() # Use monotonic for duration
     request_id = uuid.uuid4().hex[:8]
@@ -115,11 +117,27 @@ async def _orchestrate_pdf_processing(
     log_prefix = f"[{request_id}/{process_pid}]"
     print(f"{log_prefix} Orchestrating PDF: {os.path.basename(local_pdf_path)}, DPI: {dpi_param}, PageImgQuality: {quality_param}")
 
+    # Initialize progress tracker
+    progress_tracker = None
+    if task_id:
+        try:
+            progress_tracker = ProgressTracker(task_id)
+            progress_tracker.start_step(
+                ProcessingStep.INITIALIZING,
+                f"Starting PDF processing: {os.path.basename(local_pdf_path)}",
+                {"file_name": os.path.basename(local_pdf_path), "dpi": dpi_param, "quality": quality_param}
+            )
+        except Exception as e:
+            print(f"{log_prefix} Warning: Progress tracker initialization failed: {e}")
+
     all_s3_file_urls_for_response = []
     final_response_articles_list = []
 
     try:
         # --- Step 1: Convert PDF to full-page images ---
+        if progress_tracker:
+            progress_tracker.start_step(ProcessingStep.PDF_CONVERSION, "Converting PDF to images...")
+        
         time_s = time.monotonic()
         initial_full_page_image_paths = convert_pdf_to_images_with_mutool(
                                                             local_pdf_path,
@@ -134,11 +152,22 @@ async def _orchestrate_pdf_processing(
                                                             memory_limit_mb=1500)   
         total_pages = len(initial_full_page_image_paths)
         print(f"{log_prefix} PDF Conversion took: {time.monotonic() - time_s:.2f}s. Pages: {total_pages}")
+        
+        if progress_tracker:
+            progress_tracker.complete_step(f"PDF converted to {total_pages} images")
+            if initial_full_page_image_paths:
+                progress_tracker.add_page_images(initial_full_page_image_paths)
+        
         if not total_pages:
+            if progress_tracker:
+                progress_tracker.set_failed("No pages found in PDF")
             return PDFProcessingResponse(publication=publication_name_param, edition=edition_name_param, date=date_param or "unknown", language=language_name_param, zoneName=zone_name_param,  total_pages=0, articles=[{"error": ""}], file_urls="").model_dump()
 
 
         # --- Step 2: Parallel Page Processing (Arcanum Segmentation + Cropping with Arcanum Ad Filter) ---
+        if progress_tracker:
+            progress_tracker.start_step(ProcessingStep.PAGE_SEGMENTATION, f"Segmenting {total_pages} pages with Arcanum...")
+        
         time_s = time.monotonic()
         page_processing_coroutines = []
         file_id_prefix = os.path.splitext(os.path.basename(local_pdf_path))[0] + f"_{request_id}"
@@ -174,10 +203,19 @@ async def _orchestrate_pdf_processing(
                     print(f"{log_prefix} Page {page_num_for_log} processing returned unexpected type: {type(page_result_or_exc)}")
 
         print(f"{log_prefix} Page Segmentation/Cropping took: {time.monotonic() - time_s:.2f}s. Found {len(all_article_crop_infos)} potential article crops.")
-
-        # ... (Rest of the function: Step 3, 4, 5, 6 and return statement remain the same as in the previous "full file output") ...
+        
+        if progress_tracker:
+            progress_tracker.complete_step(f"Segmented {total_pages} pages, found {len(all_article_crop_infos)} articles")
+            # Add segmentation results for visualization
+            for i, page_path in enumerate(initial_full_page_image_paths):
+                page_articles = [art for art in all_article_crop_infos if art.get('pagenumber') == i + 1]
+                if page_articles:
+                    crops = [art.get('path', '') for art in page_articles]
+                    progress_tracker.add_segmentation_result(i + 1, {"articles_found": len(page_articles)}, crops)
 
         # --- Step 3: Parallel Article Analysis (Secondary Gemini Ad Check + Content Analysis) ---
+        if progress_tracker:
+            progress_tracker.start_step(ProcessingStep.ARTICLE_ANALYSIS, f"Analyzing {len(all_article_crop_infos)} articles with Gemini...")
         analysis_coroutines = []
         if all_article_crop_infos:
             time_s = time.monotonic()
@@ -188,6 +226,9 @@ async def _orchestrate_pdf_processing(
         else:
             raw_analysis_results = []
             print(f"{log_prefix} No articles to analyze after Arcanum filtering.")
+            
+        if progress_tracker:
+            progress_tracker.complete_step(f"Analyzed {len(raw_analysis_results)} articles with Gemini")
 
 
         # --- Step 4: Process Gemini analysis results & Filter (Unknown Ministry, Errors) ---
@@ -287,6 +328,15 @@ async def _orchestrate_pdf_processing(
         total_orchestration_time = time.monotonic() - start_time
         print(f"{log_prefix} Orchestration finished in {total_orchestration_time:.2f} seconds.")
 
+        # Final progress completion
+        if progress_tracker:
+            final_results = {
+                "articles": final_response_articles_list,
+                "total_pages": total_pages,
+                "processing_time": total_orchestration_time
+            }
+            progress_tracker.set_completed(final_results)
+
         return PDFProcessingResponse(
             publication=publication_name_param, edition=edition_name_param, date=determined_date_str,
             language=language_name_param, total_pages=total_pages,
@@ -300,6 +350,11 @@ async def _orchestrate_pdf_processing(
         print(f"{log_prefix} FATAL error in _orchestrate_pdf_processing ({total_orchestration_time:.2f}s): {e_orchestrate}")
         import traceback
         traceback.print_exc()
+        
+        # Mark processing as failed
+        if progress_tracker:
+            progress_tracker.set_failed(f"Fatal orchestration error: {str(e_orchestrate)}")
+        
         return PDFProcessingResponse( publication=publication_name_param, edition=edition_name_param, date=date_param or "unknown", language=language_name_param, total_pages=0, articles=[{"error": f"Fatal orchestration error: {str(e_orchestrate)}"}], file_urls="").model_dump()
 
 
@@ -313,7 +368,8 @@ def process_newspaper_pdf_sync_caller(
     zoneName: Optional[str],
     dpi: int,
     quality: int,
-    resize_bool: bool
+    resize_bool: bool,
+    task_id: Optional[str] = None
 ):
     task_specific_temp_dir = ""
     pid = os.getpid()
@@ -341,7 +397,8 @@ def process_newspaper_pdf_sync_caller(
                 dpi_param=dpi,
                 quality_param=quality,
                 task_temp_dir=task_specific_temp_dir,
-                resize_bool= resize_bool
+                resize_bool= resize_bool,
+                task_id=task_id
             )
         )
         return result_dict

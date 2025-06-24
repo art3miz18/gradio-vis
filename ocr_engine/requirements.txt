@@ -11,5 +11,5 @@ numpy
 # matplotlib
 arcanum-newspaper-segmentation-client
 celery[redis]
-redis
+redis>=4.0.0
 httpx

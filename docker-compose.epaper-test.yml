@@ -17,6 +17,7 @@ services:
     volumes:
       - ./gateway:/app # For development hot-reloading if uvicorn is run with --reload
       - newspaper_images:/app/newspaper_images # Shared volume for newspaper images
+      - gateway_pdfs:/tmp/gateway_pdfs # Shared volume for PDF files
     depends_on:
       - redis
     command: uvicorn main:app --host 0.0.0.0 --port 5001 --reload
@@ -47,6 +48,7 @@ services:
     volumes:
       - ./ocr_engine:/app
       - newspaper_images:/app/newspaper_images
+      - gateway_pdfs:/tmp/gateway_pdfs # Shared volume for PDF files
     depends_on:
       - redis
     command: celery -A celery_app:celery_ocr_engine_app worker -l info -c 4 --max-memory-per-child=300000 --max-tasks-per-child=1
@@ -73,6 +75,7 @@ services:
 volumes:
   redis_data:
   newspaper_images:
+  gateway_pdfs:
 
 networks:
   default:

@@ -372,7 +372,7 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
     -If the name of author is mentioned in the news article, extract it and store it in author_name field.
 
 
-      **Return ONLY valid JSON with this exact structure and nothing else:**
+      *Return ONLY valid JSON with this exact structure and nothing else:*
       {
         "language": "...",
         "heading": "...",
@@ -381,12 +381,11 @@ CONTENT_ANALYSIS_SYSTEM_INSTRUCTION = """ You are a highly skilled Journalist wo
         "english_content": "...",
         "english_summary": "...",
         "sentiment": "positive" | "negative" | "neutral",
-        "ministries": [ { "ministry": "..."} ],
-        "date": "dd-mm-yyyy" | "unknown",
-        "author_name": "..."
+        "ministries": [ {{ "ministry": "..." }}, {{ "ministry": "..." }} /* up to 3  */ ],
+        "author_name": "...",   
+        "date": "dd-mm-yyyy" | "unknown"
       }
       Ensure "ministries" is always an array, even if empty. Ensure "date" is in dd-mm-yyyy format or exactly "unknown".
-      If "ministries" have empty array, set values of "language", "heading", "content", "english_heading", "english_content", "english_summary", "sentiment", "author_name" as "unknown"
       DO NOT wrap the JSON in Markdown or code fences.
 
 """

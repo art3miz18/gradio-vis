@@ -108,15 +108,32 @@ async def analyze_news_article_content(
         image_data_for_main_analysis = {"mime_type": "image/jpeg", "data": article_base64}
         
         # System instruction is part of current_image_content_model
-        gemini_response_object = await asyncio.to_thread(
-            current_image_content_model.generate_content,
-            contents=[image_data_for_main_analysis]
-        )
-        gemini_response_text = gemini_response_object.text if gemini_response_object and hasattr(gemini_response_object, 'text') else None
-
-        if not gemini_response_text:
-            print(f"[{pid}] ImgAnalyzer: Main Gemini image analysis returned empty text for {unique_article_id}.")
-            return {**base_error_return, "error": "Gemini image analysis returned empty text."}
+        try:
+            gemini_response_object = await asyncio.to_thread(
+                current_image_content_model.generate_content,
+                contents=[image_data_for_main_analysis]
+            )
+            
+            # Handle the response more carefully
+            if gemini_response_object and gemini_response_object.candidates and len(gemini_response_object.candidates) > 0:
+                # Get the first candidate's content
+                candidate = gemini_response_object.candidates[0]
+                if candidate.content and candidate.content.parts:
+                    gemini_response_text = candidate.content.parts[0].text
+                else:
+                    gemini_response_text = None
+            else:
+                gemini_response_text = None
+                
+            if not gemini_response_text:
+                print(f"[{pid}] ImgAnalyzer: Main Gemini image analysis returned empty text for {unique_article_id}.")
+                return {**base_error_return, "error": "Gemini image analysis returned empty text."}
+        except ValueError as ve:
+            print(f"[{pid}] ImgAnalyzer: ValueError in Gemini API for {unique_article_id}: {str(ve)}")
+            return {**base_error_return, "error": f"Gemini API ValueError: {str(ve)}"}
+        except Exception as e:
+            print(f"[{pid}] ImgAnalyzer: Exception in Gemini API for {unique_article_id}: {str(e)}")
+            return {**base_error_return, "error": f"Gemini API error: {str(e)}"}
         
         gemini_result_dict = extract_json_from_response(gemini_response_text)
 

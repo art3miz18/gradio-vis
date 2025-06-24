@@ -11,6 +11,14 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from PIL import Image, ImageFile
 
+# Import pdf2image for fallback processing
+try:
+    from pdf2image import convert_from_path
+    PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    PDF2IMAGE_AVAILABLE = False
+    logging.warning("pdf2image not available - mutool-only mode")
+
 # Allow truncated images to be processed
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -131,6 +139,25 @@ def convert_pdf_to_images_with_mutool(
         logger.warning(f"[{pid}] {len(page_ranges)} page ranges failed after all retries")
     
     logger.info(f"[{pid}] Successfully converted {len(final_jpeg_paths)} pages")
+    
+    # If no pages were converted and pdf2image is available, try fallback
+    if len(final_jpeg_paths) == 0 and PDF2IMAGE_AVAILABLE:
+        logger.warning(f"[{pid}] Mutool failed completely, trying pdf2image fallback")
+        try:
+            fallback_paths = convert_pdf_with_pdf2image(
+                pdf_path, 
+                task_temp_dir, 
+                dpi, 
+                jpeg_quality, 
+                use_resize, 
+                max_dimension
+            )
+            if fallback_paths:
+                logger.info(f"[{pid}] pdf2image fallback succeeded: {len(fallback_paths)} pages")
+                return sorted(fallback_paths)
+        except Exception as e:
+            logger.error(f"[{pid}] pdf2image fallback also failed: {e}")
+    
     return sorted(final_jpeg_paths)
 
 def get_pdf_page_count(pdf_path: str) -> int:
@@ -302,3 +329,82 @@ def convert_png_to_jpeg(
         except:
             pass
         return None
+
+def convert_pdf_with_pdf2image(
+    pdf_path: str,
+    task_temp_dir: str, 
+    dpi: int = 200,
+    jpeg_quality: int = 80,
+    use_resize: bool = True,
+    max_dimension: int = 3000
+) -> List[str]:
+    """
+    Fallback PDF conversion using pdf2image when mutool fails.
+    
+    Args:
+        pdf_path: Input PDF file path
+        task_temp_dir: Temp directory for output files
+        dpi: Output DPI resolution
+        jpeg_quality: JPEG quality (1-100)
+        use_resize: Whether to resize oversized images
+        max_dimension: Max width or height allowed
+        
+    Returns:
+        List of JPEG image paths
+    """
+    if not PDF2IMAGE_AVAILABLE:
+        raise ImportError("pdf2image not available")
+        
+    pid = os.getpid()
+    fallback_dir = os.path.join(task_temp_dir, f"pdf2image_fallback_{uuid.uuid4().hex[:8]}")
+    Path(fallback_dir).mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Convert PDF to PIL Images using pdf2image
+        logger.info(f"[{pid}] Using pdf2image fallback for {os.path.basename(pdf_path)}")
+        
+        # Get POPPLER_PATH from environment or config
+        poppler_path = os.getenv("POPPLER_PATH", None)
+        if poppler_path and not os.path.exists(poppler_path):
+            poppler_path = None
+        
+        # Convert with pdf2image
+        images = convert_from_path(
+            pdf_path,
+            dpi=dpi,
+            poppler_path=poppler_path,
+            thread_count=2,  # Limit threads to save memory
+            timeout=300  # 5 minute timeout
+        )
+        
+        logger.info(f"[{pid}] pdf2image converted {len(images)} pages")
+        
+        jpeg_paths = []
+        for i, img in enumerate(images):
+            try:
+                # Resize if needed
+                if use_resize and (img.width > max_dimension or img.height > max_dimension):
+                    img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+                
+                # Convert to RGB if needed
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Save as JPEG
+                jpeg_filename = f"page_{i+1:03d}_{uuid.uuid4().hex[:6]}.jpg"
+                jpeg_path = os.path.join(fallback_dir, jpeg_filename)
+                img.save(jpeg_path, "JPEG", quality=jpeg_quality, optimize=True)
+                jpeg_paths.append(jpeg_path)
+                
+                # Clean up PIL image
+                img.close()
+                
+            except Exception as e:
+                logger.error(f"[{pid}] Error processing page {i+1} with pdf2image: {e}")
+                
+        logger.info(f"[{pid}] pdf2image fallback completed: {len(jpeg_paths)} pages saved")
+        return jpeg_paths
+        
+    except Exception as e:
+        logger.error(f"[{pid}] pdf2image fallback failed: {e}")
+        raise

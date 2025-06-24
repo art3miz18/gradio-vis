@@ -9,12 +9,6 @@ from typing import Dict, List, Optional
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:8000")
 GATEWAY_BASE_URL = os.environ.get("GATEWAY_BASE_URL", "http://gateway:5001")
 
-# Set up session with retry capability
-session = requests.Session()
-adapter = requests.adapters.HTTPAdapter(max_retries=3)
-session.mount('http://', adapter)
-session.mount('https://', adapter)
-
 # Global state for tracking processing
 processing_state = {
     "current_task_id": None,
@@ -73,7 +67,7 @@ def submit_pdf_with_tracking(pdf_file, publication, edition, language, zone, dat
                 "resize_bool": resize_bool,
             }
             
-            resp = session.post(url, data=data, files=files, timeout=30)
+            resp = requests.post(url, data=data, files=files)
         response_data = resp.json()
         
         if resp.status_code == 200 and "task_id" in response_data:
@@ -97,12 +91,11 @@ def submit_pdf_with_tracking(pdf_file, publication, edition, language, zone, dat
 def poll_task_status(task_id: str, base_url: str):
     """Poll task status and update global state"""
     global processing_state
-    global session
     
     while processing_state["status"] == "processing":
         try:
             # Try enhanced progress endpoint first
-            resp = session.get(f"{base_url.rstrip('/')}/tasks/{task_id}/progress", timeout=10)
+            resp = requests.get(f"{base_url.rstrip('/')}/tasks/{task_id}/progress")
             if resp.status_code == 200:
                 progress_data = resp.json()
                 
@@ -122,27 +115,6 @@ def poll_task_status(task_id: str, base_url: str):
                     processing_state["status"] = "error"
                     processing_state["step"] = f"Processing failed: {progress_data.get('message', 'Unknown error')}"
                     break
-            else:
-                # Fallback to basic task status endpoint
-                resp = session.get(f"{base_url.rstrip('/')}/tasks/{task_id}", timeout=10)
-                if resp.status_code == 200:
-                    task_data = resp.json()
-                    state = task_data.get("state", "UNKNOWN")
-                    
-                    if state == "SUCCESS":
-                        processing_state["status"] = "completed"
-                        processing_state["progress"] = 100
-                        processing_state["step"] = "Processing completed!"
-                        
-                        # Try to get articles from result
-                        result = task_data.get("result", {})
-                        if isinstance(result, dict) and result.get("articles"):
-                            processing_state["articles"] = result.get("articles", [])
-                        break
-                    elif state == "FAILURE":
-                        processing_state["status"] = "error"
-                        processing_state["step"] = f"Processing failed: {task_data.get('info', 'Unknown error')}"
-                        break
                     
         except Exception as e:
             print(f"Error polling task status: {e}")
@@ -275,45 +247,6 @@ def build_interface():
             get_processing_status,
             outputs=[status_display, results_display]
         )
-        
-        # Add JavaScript for auto-refresh
-        js_code = """
-        // Simple auto-refresh for status
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log("Setting up auto-refresh");
-            
-            // Find the refresh button
-            setTimeout(function() {
-                const buttons = document.querySelectorAll('button');
-                let refreshButton = null;
-                
-                for (const btn of buttons) {
-                    if (btn.textContent.includes('🔄') || btn.textContent.includes('Refresh')) {
-                        refreshButton = btn;
-                        break;
-                    }
-                }
-                
-                if (refreshButton) {
-                    console.log("Found refresh button, setting up auto-refresh");
-                    
-                    // Click it immediately once
-                    refreshButton.click();
-                    
-                    // Set up interval to click every 3 seconds
-                    setInterval(function() {
-                        console.log("Auto-refreshing...");
-                        refreshButton.click();
-                    }, 3000);
-                } else {
-                    console.log("Could not find refresh button");
-                }
-            }, 1000); // Wait 1 second for UI to initialize
-        });
-        """
-        
-        # Add the JavaScript to the page
-        gr.HTML(f"<script>{js_code}</script>")
 
 def main():
     with gr.Blocks(

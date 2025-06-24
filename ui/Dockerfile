@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the Gradio interface
-COPY gradio_interface.py .
+COPY gradio_interface.py ./gradio_interface.py
 
 EXPOSE 7860
 

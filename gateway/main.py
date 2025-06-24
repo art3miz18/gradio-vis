@@ -77,15 +77,30 @@ class DirectImageProcessingPayload(BaseModel):
 # Flow 1: /pipeline (Dashboard PDF Upload) - Stays the same
 @app.post("/pipeline", response_model=TaskResponse, status_code=202)
 async def enqueue_dashboard_pdf_processing(pdf: UploadFile = File(...), publicationName: str = Form(...), editionName: str = Form(None), languageName: str = Form(...), zoneName: str = Form(...), date: Optional[str] = Form(None), dpi: int = Form(200), quality: int = Form(85), resize_bool: bool = Form(True)):
-    if not s3_client or not AWS_S3_BUCKET_NAME: raise HTTPException(status_code=503, detail="S3 not configured.")
     if not pdf.filename: raise HTTPException(status_code=400, detail="No file name.")
+    
+    # Create temp directory for local PDF processing
+    import tempfile
+    temp_dir = "/tmp/gateway_pdfs"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Save PDF to local temp file
     safe_fn_base = "".join(c for c in os.path.splitext(pdf.filename)[0] if c.isalnum() or c in "._-")
-    s3_key = f"incoming_dashboard_pdfs/{uuid.uuid4().hex}_{safe_fn_base}{os.path.splitext(pdf.filename)[1]}"
+    temp_filename = f"celery_dl_{uuid.uuid4().hex}_{safe_fn_base}{os.path.splitext(pdf.filename)[1]}"
+    temp_filepath = os.path.join(temp_dir, temp_filename)
+    
     try:
-        await pdf.seek(0); s3_client.upload_fileobj(pdf.file, AWS_S3_BUCKET_NAME, s3_key, ExtraArgs={'ContentType': pdf.content_type or 'application/pdf'})
-    except Exception as e: raise HTTPException(status_code=500, detail=f"S3 upload error: {e}")
-    finally: await pdf.close()
-    task_submission = celery_gateway_app.send_task("ocr_engine.process_document", args=[s3_key, publicationName, editionName, date, languageName, zoneName, dpi, quality, False, resize_bool]) # should_notify_node=False
+        await pdf.seek(0)
+        with open(temp_filepath, "wb") as temp_file:
+            content = await pdf.read()
+            temp_file.write(content)
+    except Exception as e: 
+        raise HTTPException(status_code=500, detail=f"File save error: {e}")
+    finally: 
+        await pdf.close()
+    
+    # Send local file path to OCR engine (not S3 key)
+    task_submission = celery_gateway_app.send_task("ocr_engine.process_document", args=[temp_filepath, publicationName, editionName, date, languageName, zoneName, dpi, quality, False, resize_bool])
     return TaskResponse(task_id=task_submission.id, message="PDF processing task queued (dashboard flow).")
 
 # Flow 2: /crawl/newspaper_pdf (Crawler PDF Upload) - Stays the same
@@ -133,6 +148,61 @@ async def get_task_status(task_id: str):
     if async_result.successful(): response_data["result"] = async_result.get()
     elif async_result.failed(): response_data["result"] = str(async_result.result)
     return StatusResponse(**response_data)
+
+# --- Enhanced Task Progress Endpoint ---
+@app.get("/tasks/{task_id}/progress")
+async def get_task_progress(task_id: str):
+    """
+    Get detailed progress information for a task including step-by-step tracking,
+    processing images, segmentation results, and analysis progress.
+    """
+    import redis
+    import json
+    
+    # Get basic Celery task status
+    async_result = celery_gateway_app.AsyncResult(task_id)
+    basic_status = {
+        "task_id": task_id,
+        "celery_state": async_result.state,
+        "celery_info": async_result.info
+    }
+    
+    # Try to get detailed progress from Redis
+    try:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        redis_client = redis.from_url(redis_url)
+        progress_data = redis_client.get(f"task_progress:{task_id}")
+        
+        if progress_data:
+            detailed_progress = json.loads(progress_data)
+            # Merge basic status with detailed progress
+            detailed_progress.update(basic_status)
+            return detailed_progress
+        else:
+            # No detailed progress available, return basic status
+            basic_status.update({
+                "overall_progress": 0 if async_result.state == "PENDING" else 50 if async_result.state == "STARTED" else 100,
+                "current_step": async_result.state.lower(),
+                "message": f"Task is {async_result.state.lower()}",
+                "images": [],
+                "segmentations": [],
+                "articles": [],
+                "errors": []
+            })
+            return basic_status
+            
+    except Exception as e:
+        # Redis connection failed, return basic status with error info
+        basic_status.update({
+            "overall_progress": 0,
+            "current_step": "unknown",
+            "message": f"Progress tracking unavailable: {str(e)}",
+            "images": [],
+            "segmentations": [],
+            "articles": [],
+            "errors": [f"Progress tracking error: {str(e)}"]
+        })
+        return basic_status
 
 # Flow 4: /process/direct_images (Direct Image Processing from Crawler)
 @app.post("/process/direct_images", response_model=TaskResponse, status_code=202)
